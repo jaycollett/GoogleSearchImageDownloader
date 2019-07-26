@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace GoogleSearchImageDownloader
@@ -20,6 +21,9 @@ namespace GoogleSearchImageDownloader
                 Console.WriteLine("Please provide three arguments, the first is the path to save images to, the second is the google search term and the last is the image prefix.");
                 return;
             }
+
+            Console.WriteLine("");
+            Console.WriteLine("");
 
             try
             {
@@ -40,16 +44,20 @@ namespace GoogleSearchImageDownloader
                 // headers
                 myHTTPClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (X11; Linux i686; rv:64.0) Gecko/20100101 Firefox/64.0");
 
+                Console.WriteLine("Grabbing Google search results and parsing out URLs...");
                 List<string> urls = GetUrls(GetHtmlCode(imageSearchTerm));
+                Console.WriteLine("Spinning up background threads to download images...");
                 int t = 0;
                 Task[] tasks = new Task[urls.Count];
                 foreach (string tmpString in urls)
                 {
                     ImageObject tmpImgObj = new ImageObject { ImageNumber = t, ImageURL = tmpString };
-                    tasks[t] = Task.Run(() => DownloadImage(tmpImgObj));
+                    tasks[t] = Task.Factory.StartNew(() =>
+                    {
+                        DownloadImage(tmpImgObj);
+                    }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default); 
                     t++;
                 }
-
                 Task.WaitAll(tasks);
             }
             catch(Exception e)
@@ -60,12 +68,18 @@ namespace GoogleSearchImageDownloader
 
         private static void DownloadImage(ImageObject tmpImgObj)
         {
-            byte[] image = GetImage(tmpImgObj.ImageURL);
-            if (image != null)
+            try
             {
-                File.WriteAllBytes(pathToSaveFiles + $"\\{imagePrefix}_glImage_{tmpImgObj.ImageNumber}.jpg", image);
+                byte[] image = GetImage(tmpImgObj.ImageURL);
+                if (image != null)
+                {
+                    File.WriteAllBytes(pathToSaveFiles + $"\\{imagePrefix}_glImage_{tmpImgObj.ImageNumber}.jpg", image);
+                }
+                Console.WriteLine($"Downloaded image {tmpImgObj.ImageNumber}...");
+            }catch(Exception e)
+            {
+                Console.WriteLine($"An error occured downloading or saving the image {tmpImgObj.ImageNumber}");
             }
-            Console.WriteLine($"Downloaded image {tmpImgObj.ImageNumber}...");
         }
         private static string GetHtmlCode(string searchString)
         {
@@ -88,20 +102,31 @@ namespace GoogleSearchImageDownloader
 
         private static List<string> GetUrls(string html)
         {
-            var urls = new List<string>();
-
-            int ndx = html.IndexOf("\"ou\"", StringComparison.Ordinal);
-
-            while (ndx >= 0)
+            try
             {
-                ndx = html.IndexOf("\"", ndx + 4, StringComparison.Ordinal);
-                ndx++;
-                int ndx2 = html.IndexOf("\"", ndx, StringComparison.Ordinal);
-                string url = html.Substring(ndx, ndx2 - ndx);
-                urls.Add(url);
-                ndx = html.IndexOf("\"ou\"", ndx2, StringComparison.Ordinal);
+                var urls = new List<string>();
+
+                int ndx = html.IndexOf("\"ou\"", StringComparison.Ordinal);
+
+                while (ndx >= 0)
+                {
+                    ndx = html.IndexOf("\"", ndx + 4, StringComparison.Ordinal);
+                    ndx++;
+                    int ndx2 = html.IndexOf("\"", ndx, StringComparison.Ordinal);
+                    string url = html.Substring(ndx, ndx2 - ndx);
+                    urls.Add(url);
+                    ndx = html.IndexOf("\"ou\"", ndx2, StringComparison.Ordinal);
+                }
+
+                return urls;
+
             }
-            return urls;
+            catch(Exception e)
+            {
+                Console.WriteLine("An error occured attempting to parse urls from html...");
+            }
+
+            return null;
         }
 
         private static byte[] GetImage(string url)
@@ -116,7 +141,7 @@ namespace GoogleSearchImageDownloader
 
             } catch(Exception e)
             {
-                Console.WriteLine(e);
+                Console.WriteLine("An error occured attempting to download the image...");
             }
             return null;
         }
